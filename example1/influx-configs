@@ -1,0 +1,5 @@
+[default]
+  url = "http://database:8086"
+  token = "T0rizonTh3Ea&IndustrialPlatform"
+  org = "toradex"
+  active = true

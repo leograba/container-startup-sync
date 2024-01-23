@@ -1,0 +1,118 @@
+version: "3.9"
+services:
+
+  app:
+    image: influxdb:2.7.5
+    networks:
+      - influxdbnet
+      - frontend
+    volumes:
+      - "$PWD/get-data.sh:/get-data.sh:ro"
+      - "$PWD/influx-configs:/etc/influxdb2/influx-configs:ro"
+    command: ["/get-data.sh"]
+  
+  database:
+    image: influxdb:2.7.5
+    networks:
+      - influxdbnet
+    # setup InfluxDB during the first container startup
+    # this is ignored on the second startup onward
+    environment:
+      - DOCKER_INFLUXDB_INIT_MODE=setup
+      - DOCKER_INFLUXDB_INIT_USERNAME=torizon
+      - DOCKER_INFLUXDB_INIT_PASSWORD=T0rizonEasy2Us&
+      - DOCKER_INFLUXDB_INIT_ORG=toradex
+      - DOCKER_INFLUXDB_INIT_BUCKET=mydatabucket
+      - DOCKER_INFLUXDB_INIT_RETENTION=180d
+      - DOCKER_INFLUXDB_INIT_ADMIN_TOKEN=T0rizonTh3Ea&IndustrialPlatform
+    volumes:
+      - "influxdb-storage:/var/lib/influxdb2"
+  
+  visualization:
+    image: grafana/grafana:10.2.3
+    networks:
+      - influxdbnet
+      - frontend
+    volumes:
+      - "grafana-storage:/var/lib/grafana"
+      - $PWD/grafana.ini:/etc/grafana/grafana.ini
+      - $PWD/datasource.yaml:/etc/grafana/provisioning/datasources/datasource.yaml
+      - $PWD/dashboard.yaml:/etc/grafana/provisioning/dashboards/dashboard.yaml
+      - $PWD/dashboard.json:/var/lib/grafana/dashboards/dashboard.json
+    # make the application available on port 3000
+    # not only to the local GUI but also on the LAN
+    ports:
+      - "3000:3000"
+  
+  graphics:
+    image: torizon/weston:3.2.2
+    platform: linux/arm
+    # Required to get udev events from host udevd via netlink
+    network_mode: host
+    volumes:
+      - type: bind
+        source: /tmp
+        target: /tmp
+      - type: bind
+        source: /dev
+        target: /dev
+      - type: bind
+        source: /run/udev
+        target: /run/udev
+    cap_add:
+      - CAP_SYS_TTY_CONFIG
+    # Add device access rights through cgroup...
+    device_cgroup_rules:
+      # ... for /dev/tty devices
+      - 'c 4:* rmw'
+      # ... for /dev/input devices
+      - 'c 13:* rmw'
+      # ... for /dev/dri devices
+      - 'c 226:* rmw'
+    healthcheck:
+      test: ["CMD-SHELL", "test", "$$WAYLAND_DISPLAY"]
+      start_period: 5s
+  
+  gui:
+    image: torizon/chromium:3.0.2
+    platform: linux/arm
+    environment:
+      - MACHINE
+    security_opt:
+      - seccomp:unconfined
+    networks:
+      - frontend
+    volumes:
+      - type: bind
+        source: /tmp
+        target: /tmp
+      - type: bind
+        source: /var/run/dbus
+        target: /var/run/dbus
+      - type: bind
+        source: /dev/dri
+        target: /dev/dri
+    shm_size: '256mb'
+    device_cgroup_rules:
+      # ... for /dev/dri devices
+      - 'c 226:* rmw'
+    depends_on:
+      graphics:
+        condition: service_healthy
+    # add a sleep to the original entrypoint script
+    # the command will not be interpreted as an option, so append to entrypoint
+    # command: http://visualization:3000/d/tor-jenkins-status/tor-jenkins-status?orgId=1\&refresh=15m\&kiosk
+    entrypoint:
+      - /bin/sh
+      - -c
+      - sleep 65 && /usr/bin/start-browser http://visualization:3000/d/tor-jenkins-status/tor-jenkins-status?orgId=1\&refresh=15m\&kiosk
+
+networks:
+  influxdbnet:
+    internal: true
+  frontend:
+    internal: false
+
+volumes:
+  grafana-storage:
+  influxdb-storage:
